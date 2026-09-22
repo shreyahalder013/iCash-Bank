@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>iCash — Bank Without Your Card</title>
+<meta name="description" content="iCash: Cardless face-authenticated banking. Withdraw, send, and manage money securely without a physical card.">
+
+<!-- Fonts -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<!-- Styles -->
+<link rel="stylesheet" href="css/style.css">
+
+<!-- Three.js (for hero 3D scene) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+<!-- Chart.js (for analytics) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+
+<!-- MediaPipe Face Mesh (for real eye tracking & blink detection) -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+</head>
+<body>
+<a href="#dashboard" class="skip-link">Skip to content</a>
+<div id="app"></div>
+<div class="toast-wrap" id="toastWrap"></div>
+
+<!-- Core App (State, Router, Helpers, Navbar, Modal) -->
+<script src="js/app.js"></script>
+
+<!-- Face Scanner (MediaPipe blink detection) -->
+<script src="js/face-scanner.js"></script>
+
+<!-- Page Modules -->
+<script src="js/landing.js"></script>
+<script src="js/register.js"></script>
+<script src="js/login.js"></script>
+<script src="js/dashboard.js"></script>
+<script src="js/withdraw.js"></script>
+<script src="js/send.js"></script>
+<script src="js/receive.js"></script>
+<script src="js/history.js"></script>
+<script src="js/analytics.js"></script>
+<script src="js/security.js"></script>
+<script src="js/profile.js"></script>
+<script src="js/atm.js"></script>
+
+<!-- Boot -->
+<script>
+  if(!location.hash) location.hash = '#landing';
+  render();
+</script>
+</body>
+</html>
