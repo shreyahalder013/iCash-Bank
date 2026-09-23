@@ -1,15 +1,28 @@
 /* =========================================================
    ICASH — Supabase / PostgreSQL Database Layer
-   Uses node-postgres (pg) Pool connected via SUPABASE_DB_URL.
+   Uses node-postgres (pg) Pool.
+   Supports individual PG* env vars (recommended) to avoid
+   URL-encoding issues with special characters in passwords.
    All exported functions keep the same signature as the old
    sql.js version so server.js requires zero changes.
 ========================================================= */
 const { Pool } = require('pg');
 
-const pool = new Pool({
-  connectionString: process.env.SUPABASE_DB_URL,
-  ssl: { rejectUnauthorized: false }   // required for Supabase hosted TLS
-});
+// Prefer individual vars (no URL-encoding needed for password).
+// Fall back to a single connection string if PG_HOST is not set.
+const pool = process.env.PG_HOST
+  ? new Pool({
+      host:     process.env.PG_HOST,
+      port:     parseInt(process.env.PG_PORT || '6543'),
+      database: process.env.PG_DATABASE || 'postgres',
+      user:     process.env.PG_USER,
+      password: process.env.PG_PASSWORD,
+      ssl:      { rejectUnauthorized: false }
+    })
+  : new Pool({
+      connectionString: process.env.SUPABASE_DB_URL,
+      ssl: { rejectUnauthorized: false }
+    });
 
 /* =========================================================
    INIT
