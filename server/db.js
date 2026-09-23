@@ -7,9 +7,18 @@
    sql.js version so server.js requires zero changes.
 ========================================================= */
 const { Pool } = require('pg');
+const path = require('path');
+
+// Automatically load .env if present
+try {
+  if (process.loadEnvFile) {
+    process.loadEnvFile(path.join(__dirname, '..', '.env'));
+  }
+} catch (e) {}
 
 // Prefer individual vars (no URL-encoding needed for password).
-// Fall back to a single connection string if PG_HOST is not set.
+// Fall back to SUPABASE_DB_URL or DATABASE_URL.
+const dbUrl = process.env.SUPABASE_DB_URL || process.env.DATABASE_URL;
 const pool = process.env.PG_HOST
   ? new Pool({
       host:     process.env.PG_HOST,
@@ -20,8 +29,8 @@ const pool = process.env.PG_HOST
       ssl:      { rejectUnauthorized: false }
     })
   : new Pool({
-      connectionString: process.env.SUPABASE_DB_URL,
-      ssl: { rejectUnauthorized: false }
+      connectionString: dbUrl,
+      ssl: dbUrl ? { rejectUnauthorized: false } : false
     });
 
 /* =========================================================

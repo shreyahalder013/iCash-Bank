@@ -486,7 +486,8 @@ function mountFaceScanner(container, opts) {
   /* ---- Server-Side Cryptographic Verification ---- */
   async function verifyWithBackend(liveDescriptor, livenessProof) {
     try {
-      const res = await fetch('/api/auth/biometric/verify', {
+      const apiBase = typeof API !== 'undefined' ? API : '/api';
+      const res = await fetch(apiBase + '/auth/biometric/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',

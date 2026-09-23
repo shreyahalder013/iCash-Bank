@@ -57,22 +57,38 @@ function calculateCosineSimilarity(a, b) {
   return dot / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
-// SECURITY FIX (VULN-8): CORS must never allow all origins with credentials.
-// Use an explicit allowlist. Set ALLOWED_ORIGINS env var to a comma-separated
-// list of allowed origins (e.g. https://myapp.onrender.com,http://localhost:3000).
+// Automatically load .env if present
+try {
+  if (process.loadEnvFile) {
+    process.loadEnvFile(path.join(__dirname, '..', '.env'));
+  }
+} catch (e) {}
+
+// SECURITY FIX (VULN-8): CORS allowlist. In development, automatically allow
+// any localhost or 127.0.0.1 port (such as Live Server on 5500, Vite on 5173).
 const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
-  : ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:5000'];
+  : [
+      'http://localhost:3000', 'http://127.0.0.1:3000',
+      'http://localhost:5500', 'http://127.0.0.1:5500',
+      'http://localhost:5173', 'http://127.0.0.1:5173',
+      'http://localhost:5000', 'http://localhost:8080'
+    ];
 
 // SECURITY FIX (VULN-7): Cookie must be secure in production HTTPS deployments.
-// Detect production by NODE_ENV or by a non-default PORT (Render sets PORT != 3000).
-const IS_PRODUCTION = process.env.NODE_ENV === 'production' || (process.env.PORT && process.env.PORT !== '3000');
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
 // Middleware
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (server-to-server, Postman in dev)
+    // Allow requests with no origin (server-to-server, Postman in dev, file://)
     if (!origin) return callback(null, true);
+    // In dev mode allow any localhost or 127.0.0.1 port (e.g. 5500 Live Server, 5173 Vite)
+    if (!IS_PRODUCTION) {
+      if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+        return callback(null, true);
+      }
+    }
     if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
     return callback(new Error(`CORS blocked: origin ${origin} not in allowlist`));
   },
@@ -115,6 +131,10 @@ app.get('/api/session', (req, res) => {
     return res.json({ active: true, userId: req.session.userId });
   }
   return res.json({ active: false });
+});
+
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', server: 'icash-biometric', time: new Date().toISOString() });
 });
 
 /* =========================================================

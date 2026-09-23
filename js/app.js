@@ -4,7 +4,15 @@
 ========================================================= */
 
 /* ---------- API BASE ---------- */
-const API = '/api';
+const API = (function() {
+  if (typeof window !== 'undefined') {
+    // If the frontend is accessed via file:// or a dev server on another port (e.g. Live Server on 5500)
+    if (window.location.protocol === 'file:' || (window.location.port && window.location.port !== '3000')) {
+      return 'http://localhost:3000/api';
+    }
+  }
+  return '/api';
+})();
 
 /* ---------- DEFAULT TX (for seeding) ---------- */
 const DEFAULT_TX = [
