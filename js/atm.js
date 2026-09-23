@@ -1,5 +1,11 @@
 /* =========================================================
-   ICASH — ATM Simulation
+   ICASH — ATM Simulation (SECURE)
+
+   SECURITY FIX (VULN-1): The original ATM used mountFaceScanner with NO
+   accountId, NO server challenge, and NO identity verification. Any face
+   that completed the blink challenge was admitted. This has been rewritten
+   to use the same full cryptographic challenge-response pipeline as the
+   main login page.
 ========================================================= */
 route('atm', function(){
   if(!requireAuth()) return;
@@ -14,22 +20,93 @@ function renderAtmWelcome(){
   box.innerHTML = `
     <div class="auth-head"><div class="eyebrow" style="justify-content:center;">iCASH ATM · DEMO KIOSK</div><h2 style="margin-top:8px;">Welcome to iCash</h2><p>No card needed — authenticate with your face</p></div>
     <button class="btn btn-primary btn-block" id="atmAuthBtn">${iconSvg('face')} Authenticate with Face</button>`;
-  document.getElementById('atmAuthBtn').onclick = ()=>{
-    box.innerHTML = `<div class="auth-head"><h2>Verifying</h2></div><div id="atmFaceHolder"></div>`;
-    mountFaceScanner(document.getElementById('atmFaceHolder'), {
-      onSuccess: ()=>{
-        box.innerHTML = `
-          <div class="auth-head"><h2>Welcome, ${State.user.name.split(' ')[0]}</h2><p>Available balance</p></div>
-          <div class="balance-amt" style="text-align:center; margin-bottom:20px;">${fmtINR(State.balance)}</div>
-          <div class="qa-grid" style="grid-template-columns:repeat(2,1fr);">
-            <button class="card qa" onclick="nav('withdraw')"><div class="ic">${iconSvg('withdraw')}</div><span>Withdraw</span></button>
-            <button class="card qa" onclick="toast('Demo deposits aren\\'t enabled in this prototype','warn')"><div class="ic">${iconSvg('receive')}</div><span>Deposit</span></button>
-            <button class="card qa" onclick="nav('send')"><div class="ic">${iconSvg('send')}</div><span>Send Money</span></button>
-            <button class="card qa" onclick="nav('history')"><div class="ic">${iconSvg('history')}</div><span>Check Balance</span></button>
-          </div>
-          <button class="btn btn-outline btn-block" style="margin-top:16px; color:var(--danger); border-color:rgba(255,92,122,0.35);" onclick="nav('login')">${iconSvg('alert')} Emergency Assistance</button>
-        `;
+
+  document.getElementById('atmAuthBtn').onclick = async () => {
+    box.innerHTML = `
+      <div class="auth-head">
+        <h2>Initializing Biometrics</h2>
+        <p>Connecting to secure authentication server…</p>
+      </div>
+      <div style="text-align:center; padding:30px;"><div class="dot" style="margin:0 auto; width:28px; height:28px; border:2px solid var(--accent); border-top-color:transparent; border-radius:50%; animation:spin 1s linear infinite;"></div></div>`;
+
+    try {
+      // SECURITY: Request account-bound cryptographic challenge, same as login flow.
+      // This ties the biometric scan to THIS user's enrolled template.
+      const targetUserId = State.user && State.user.id;
+      if (!targetUserId) {
+        toast('No authenticated account found. Please log in first.', 'danger');
+        nav('login');
+        return;
       }
-    });
+
+      const res = await fetch(API + '/auth/biometric/challenge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ accountId: targetUserId })
+      });
+      const data = await res.json();
+
+      if (!res.ok && data.error === 'NO_BIOMETRIC_ENROLLED') {
+        box.innerHTML = `
+          <div class="auth-head">
+            <h2 style="color:var(--warn)">Face ID Not Enrolled</h2>
+            <p>${data.message || 'No biometric profile enrolled for this account.'}</p>
+          </div>
+          <div style="padding:10px 0 20px; font-size:13.5px; color:var(--muted); line-height:1.6;">
+            Enroll your Face ID from the Profile or Login page first.
+          </div>
+          <button class="btn btn-ghost btn-block" id="atmBackBtn">Back to ATM Menu</button>`;
+        document.getElementById('atmBackBtn').onclick = renderAtmWelcome;
+        return;
+      }
+
+      if (!res.ok || !data.challengeId) {
+        toast(data.error || 'Could not initiate biometric challenge', 'danger');
+        renderAtmWelcome();
+        return;
+      }
+
+      // Mount the scanner with the account-bound challenge
+      box.innerHTML = `
+        <div class="auth-head">
+          <h2>ATM Biometric Verification</h2>
+          <p>Verifying identity for <b>${State.user.name}</b></p>
+        </div>
+        <div id="atmFaceHolder"></div>`;
+
+      mountFaceScanner(document.getElementById('atmFaceHolder'), {
+        challenge: data,  // ← account-bound server challenge
+        onSuccess: (authData) => {
+          // SECURITY: Verify server confirmed identity before showing balance
+          if (!authData || authData.success !== true) {
+            toast('Identity verification failed — ATM access denied', 'danger');
+            renderAtmWelcome();
+            return;
+          }
+
+          box.innerHTML = `
+            <div class="auth-head"><h2>Welcome, ${State.user.name.split(' ')[0]}</h2><p>Available balance</p></div>
+            <div class="balance-amt" style="text-align:center; margin-bottom:20px;">${fmtINR(State.balance)}</div>
+            <div class="qa-grid" style="grid-template-columns:repeat(2,1fr);">
+              <button class="card qa" onclick="nav('withdraw')">${iconSvg('withdraw')}<span>Withdraw</span></button>
+              <button class="card qa" onclick="toast('Demo deposits aren\\'t enabled in this prototype','warn')">${iconSvg('receive')}<span>Deposit</span></button>
+              <button class="card qa" onclick="nav('send')">${iconSvg('send')}<span>Send Money</span></button>
+              <button class="card qa" onclick="nav('history')">${iconSvg('history')}<span>Check Balance</span></button>
+            </div>
+            <button class="btn btn-outline btn-block" style="margin-top:16px; color:var(--danger); border-color:rgba(255,92,122,0.35);" onclick="nav('login')">${iconSvg('alert')} Emergency Assistance</button>
+          `;
+        },
+        onCancel: renderAtmWelcome,
+        onFailure: (err) => {
+          console.warn('[ATM] Biometric verification failed:', err);
+        }
+      });
+
+    } catch (e) {
+      console.error('[ATM] Challenge request failed:', e);
+      toast('Network error connecting to biometric server', 'danger');
+      renderAtmWelcome();
+    }
   };
 }

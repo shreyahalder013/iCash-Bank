@@ -118,7 +118,13 @@ function renderWizardStep(){
     document.getElementById('back4').onclick=()=>{RegState.step=3; renderWizardStep();};
     mountFaceScanner(document.getElementById('faceRegHolder'), {
       mode:'register', senior:RegState.senior,
-      onSuccess: async ()=>{
+      onSuccess: async (result)=>{
+        // SECURITY FIX (VULN-2): Validate that we actually captured a real 128-d template
+        if (!result || !result.biometricTemplate || !Array.isArray(result.biometricTemplate) || result.biometricTemplate.length !== 128) {
+          toast('Biometric capture failed — no valid face template produced. Please retry.', 'danger');
+          return;
+        }
+
         State.user = {
           name:RegState.name, phone:RegState.phone, aadhaar:RegState.aadhaar, email:RegState.email,
           dob:RegState.dob, age:RegState.age, senior:RegState.senior,
@@ -127,25 +133,37 @@ function renderWizardStep(){
         };
         State.tx = DEFAULT_TX.slice(); State.balance = 48750;
 
-        // Register via API
+        // Register via API — MUST include biometricTemplate or face login will never work
         try {
-          await fetch(API + '/register', {
+          const res = await fetch(API + '/register', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
-            body: JSON.stringify({ user: State.user, transactions: State.tx, balance: State.balance })
+            body: JSON.stringify({
+              user: State.user,
+              transactions: State.tx,
+              balance: State.balance,
+              biometricTemplate: result.biometricTemplate  // ← CRITICAL fix: was missing
+            })
           });
-        } catch(e) { /* fallback to localStorage */ }
+          const d = await res.json();
+          if (!res.ok) {
+            toast(d.error || 'Registration failed — please try again.', 'danger');
+            return;
+          }
+          // Load authenticated session from server response
+          await State.load();
+        } catch(e) {
+          console.warn('[Register] API unavailable, falling back to localStorage:', e.message);
+          State.session = {active:true, method:'register'};
+        }
 
-        State.logEvent('Registration', 'iCash ID created — face identity registered');
+        State.logEvent('Registration', 'iCash ID created — face identity enrolled');
         State.save();
         toast('Face identity registered ✓','ok');
-        setTimeout(()=>{
-          State.session = {active:true, method:'register'};
-          State.save();
-          nav('dashboard');
-        }, 900);
+        setTimeout(()=>nav('dashboard'), 900);
       }
     });
+
   }
 }

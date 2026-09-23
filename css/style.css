@@ -154,6 +154,14 @@ footer .fr{display:flex; justify-content:space-between; flex-wrap:wrap; gap:10px
 .scan-check .dot{width:16px; height:16px; border-radius:50%; border:1.5px solid var(--muted2); display:grid; place-items:center; font-size:10px; flex-shrink:0; transition:.2s;}
 .scan-check.on{color:var(--text);}
 .scan-check.on .dot{background:var(--success); border-color:var(--success); color:#00170f;}
+.scan-check.failed{color:var(--danger);}
+.scan-check.failed .dot{background:var(--danger); border-color:var(--danger); color:#fff;}
+.scan-check.active{color:var(--accent); font-weight:600;}
+.scan-check.active .dot{border-color:var(--accent); box-shadow:0 0 8px var(--accent); animation:pulse 1.2s infinite;}
+.challenge-box{background:rgba(79,209,255,0.08); border:1px solid rgba(79,209,255,0.3); border-radius:12px; padding:12px 14px; margin:10px 0 16px; text-align:center;}
+.challenge-title{font-size:10.5px; text-transform:uppercase; letter-spacing:1.5px; color:var(--accent); margin-bottom:4px; font-weight:700;}
+.challenge-instruction{font-size:14px; font-weight:600; color:var(--text);}
+.challenge-progress{font-size:11.5px; color:var(--muted); margin-top:4px;}
 .demo-tag{text-align:center; font-size:10.5px; letter-spacing:1.5px; color:var(--muted2); text-transform:uppercase; margin-top:4px;}
 
 /* ---------- APP SHELL / DASHBOARD ---------- */

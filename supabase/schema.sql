@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS users (
   emergency_contact_phone     TEXT,
   emergency_contact_relation  TEXT,
   face_registered             BOOLEAN DEFAULT FALSE,
+  biometric_template          TEXT,
   last_login                  TEXT,
   senior_mode                 BOOLEAN DEFAULT FALSE,
   balance                     NUMERIC(12,2) DEFAULT 48750,

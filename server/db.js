@@ -60,12 +60,20 @@ async function initDb() {
       emergency_contact_phone     TEXT,
       emergency_contact_relation  TEXT,
       face_registered             BOOLEAN DEFAULT FALSE,
+      biometric_template          TEXT,
       last_login                  TEXT,
       senior_mode                 BOOLEAN DEFAULT FALSE,
       balance                     NUMERIC(12,2) DEFAULT 48750,
       created_at                  TIMESTAMPTZ DEFAULT NOW()
     )
   `);
+
+  // Ensure biometric_template column exists on existing deployments
+  try {
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS biometric_template TEXT;`);
+  } catch (err) {
+    console.warn('Column migration note:', err.message);
+  }
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS transactions (
@@ -154,6 +162,7 @@ async function seedIfEmpty() {
 ========================================================= */
 function formatUser(row) {
   if (!row) return null;
+  const hasBio = !!(row.biometric_template && row.biometric_template.length > 10);
   return {
     id:            row.id,
     name:          row.name,
@@ -163,14 +172,13 @@ function formatUser(row) {
     dob:           row.dob,
     age:           row.age,
     senior:        !!row.senior,
-    normalPin:     row.normal_pin,
-    emergencyPin:  row.emergency_pin,
     emergencyContact: {
       name:     row.emergency_contact_name,
       phone:    row.emergency_contact_phone,
       relation: row.emergency_contact_relation
     },
-    faceRegistered: !!row.face_registered,
+    faceRegistered: !!row.face_registered || hasBio,
+    hasBiometric:  hasBio,
     lastLogin:     row.last_login,
     seniorMode:    !!row.senior_mode,
     balance:       parseFloat(row.balance)
@@ -178,13 +186,16 @@ function formatUser(row) {
 }
 
 async function createUser(userData) {
+  const bioTemplate = userData.biometricTemplate ? JSON.stringify(userData.biometricTemplate) : null;
+  const isFaceReg = userData.faceRegistered || !!bioTemplate;
+
   const { rows } = await pool.query(`
     INSERT INTO users (
       name, phone, aadhaar, email, dob, age, senior,
       normal_pin, emergency_pin,
       emergency_contact_name, emergency_contact_phone, emergency_contact_relation,
-      face_registered, last_login, senior_mode, balance
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+      face_registered, biometric_template, last_login, senior_mode, balance
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
     RETURNING id
   `, [
     userData.name, userData.phone, userData.aadhaar, userData.email,
@@ -193,7 +204,8 @@ async function createUser(userData) {
     userData.emergencyContact?.name  || null,
     userData.emergencyContact?.phone || null,
     userData.emergencyContact?.relation || null,
-    userData.faceRegistered ? true : false,
+    isFaceReg,
+    bioTemplate,
     userData.lastLogin || 'Just now',
     userData.seniorMode ? true : false,
     48750
@@ -211,9 +223,43 @@ async function getUserByPhone(phone) {
   return formatUser(rows[0] || null);
 }
 
+async function getUserRawById(id) {
+  const { rows } = await pool.query('SELECT * FROM users WHERE id = $1', [id]);
+  return rows[0] || null;
+}
+
+async function getUserRawByPhone(phone) {
+  const { rows } = await pool.query('SELECT * FROM users WHERE phone = $1', [phone]);
+  return rows[0] || null;
+}
+
 async function getFirstUser() {
   const { rows } = await pool.query('SELECT * FROM users ORDER BY id ASC LIMIT 1');
   return formatUser(rows[0] || null);
+}
+
+async function getFirstUserRaw() {
+  const { rows } = await pool.query('SELECT * FROM users ORDER BY id ASC LIMIT 1');
+  return rows[0] || null;
+}
+
+async function getUserBiometricTemplate(userId) {
+  const { rows } = await pool.query('SELECT biometric_template FROM users WHERE id = $1', [userId]);
+  if (!rows[0] || !rows[0].biometric_template) return null;
+  try {
+    const parsed = JSON.parse(rows[0].biometric_template);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function updateUserBiometricTemplate(userId, template) {
+  const serialized = JSON.stringify(template);
+  await pool.query(
+    'UPDATE users SET biometric_template = $1, face_registered = TRUE WHERE id = $2',
+    [serialized, userId]
+  );
 }
 
 async function updateUser(id, data) {
@@ -326,7 +372,12 @@ module.exports = {
   createUser,
   getUserById,
   getUserByPhone,
+  getUserRawById,
+  getUserRawByPhone,
   getFirstUser,
+  getFirstUserRaw,
+  getUserBiometricTemplate,
+  updateUserBiometricTemplate,
   updateUser,
   getTransactions,
   createTransaction,

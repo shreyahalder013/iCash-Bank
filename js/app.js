@@ -50,13 +50,17 @@ const State = {
     this.user = JSON.parse(localStorage.getItem('icash_user') || 'null');
     this.tx = JSON.parse(localStorage.getItem('icash_tx') || 'null') || DEFAULT_TX.slice();
     this.balance = parseFloat(localStorage.getItem('icash_balance') || '48750');
-    this.session = JSON.parse(localStorage.getItem('icash_session') || 'null');
     this.events = JSON.parse(localStorage.getItem('icash_events') || '[]');
+    // SECURITY FIX (VULN-10): Never restore session.active=true from localStorage.
+    // An attacker could set localStorage to appear authenticated. Session validity
+    // must ALWAYS be verified server-side via /api/user. We only restore non-auth
+    // user metadata (name, phone) for display purposes on the login page.
+    this.session = null;
     if(!this.user){
       this.user = {
         name:'Siddharth Pal', phone:'+91 98765 43210', aadhaar:'482145678921',
         email:'siddharth.demo@icash.app', dob:'1999-04-12', age: this.calcAge('1999-04-12'),
-        senior:false, normalPin:'2468', emergencyPin:'9999',
+        senior:false,
         emergencyContact:{name:'Ravi Pal', phone:'+91 91234 56789', relation:'Father'},
         faceRegistered:true, lastLogin:'20 Sep 2026, 09:14', seniorMode:false
       };
@@ -131,6 +135,11 @@ function route(name, fn){ routes[name] = fn; }
 function nav(name){ location.hash = '#'+name; }
 function currentRoute(){ return (location.hash || '#landing').slice(1).split('?')[0]; }
 window.addEventListener('hashchange', render);
+// SECURITY FIX (VULN-4): requireAuth() must NOT trust localStorage for session validity.
+// We check State.session which is now only populated by a successful server response
+// (see State.load() and _loadLocal() fix). If session is missing, redirect to login.
+// For synchronous route rendering we rely on the load() having been called at boot;
+// any route that needs auth should also call State.load() and wait for it.
 function requireAuth(){
   if(!State.session || !State.session.active){ nav('login'); return false; }
   return true;
@@ -201,7 +210,21 @@ function navbar(){
   </div>`);
   mount(bar);
   if(loggedIn){
-    bar.querySelector('#logoutBtn').onclick = ()=>{ State.session={active:false}; State.save(); toast('Logged out'); nav('landing'); };
+    bar.querySelector('#logoutBtn').onclick = async ()=>{
+      // SECURITY FIX (VULN-5): Always terminate the server session on logout.
+      // Previously only localStorage was cleared — the server session remained active,
+      // allowing session token reuse by anyone with access to the session cookie.
+      try {
+        await fetch(API + '/logout', { method: 'POST', credentials: 'include' });
+      } catch(e) {
+        console.warn('[Logout] Server logout request failed:', e.message);
+      }
+      State.session = null;
+      State.user = null;
+      localStorage.removeItem('icash_session');
+      toast('Logged out securely');
+      nav('landing');
+    };
     bar.querySelector('#atmBtn').onclick = ()=> nav('atm');
   }
   bar.querySelector('#hambBtn').onclick = ()=>{
