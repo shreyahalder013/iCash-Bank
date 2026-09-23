@@ -28,9 +28,20 @@ const pool = process.env.PG_HOST
    INIT
 ========================================================= */
 async function initDb() {
+  // Startup diagnostics — helps debug env var issues on Render
+  console.log('=== DB Connection Diagnostics ===');
+  console.log('PG_HOST    :', process.env.PG_HOST     || '(not set)');
+  console.log('PG_PORT    :', process.env.PG_PORT     || '(not set)');
+  console.log('PG_USER    :', process.env.PG_USER     || '(not set)');
+  console.log('PG_PASSWORD:', process.env.PG_PASSWORD ? '(set)' : '(not set)');
+  console.log('SUPABASE_DB_URL:', process.env.SUPABASE_DB_URL ? '(set)' : '(not set)');
+  console.log('Using mode :', process.env.PG_HOST ? 'individual vars' : 'connection URL');
+  console.log('=================================');
+
   // Verify connection
   const client = await pool.connect();
   client.release();
+
 
   // Create tables if they don't exist yet
   await pool.query(`
