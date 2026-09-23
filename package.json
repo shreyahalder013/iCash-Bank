@@ -1,0 +1,15 @@
+{
+  "name": "icash-bank",
+  "version": "1.0.0",
+  "description": "iCash Banking App",
+  "scripts": {
+    "start": "node server/server.js",
+    "dev": "node server/server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.0",
+    "express-session": "^1.18.1",
+    "sql.js": "^1.11.0"
+  }
+}
