@@ -78,22 +78,27 @@ const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
 // SECURITY FIX (VULN-7): Cookie must be secure in production HTTPS deployments.
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
+// Allow Chrome Private Network Access (e.g. 127.0.0.1 to localhost preflight)
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Private-Network', 'true');
+  next();
+});
+
 // Middleware
 app.use(cors({
   origin: (origin, callback) => {
     // Allow requests with no origin (server-to-server, Postman in dev, file://)
     if (!origin) return callback(null, true);
-    // In dev mode allow any localhost or 127.0.0.1 port (e.g. 5500 Live Server, 5173 Vite)
+    // In dev mode allow any origin (localhost, 127.0.0.1, LAN IPs on any port)
     if (!IS_PRODUCTION) {
-      if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
-        return callback(null, true);
-      }
+      return callback(null, true);
     }
     if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
-    return callback(new Error(`CORS blocked: origin ${origin} not in allowlist`));
+    return callback(null, false);
   },
   credentials: true
 }));
+app.options('*', cors());
 app.use(express.json({ limit: '5mb' }));
 app.use(session({
   secret: process.env.SESSION_SECRET || 'icash-biometric-secret-2026-CHANGE-IN-PROD',
@@ -626,7 +631,7 @@ app.post('/api/events', async (req, res) => {
 async function start() {
   await db.initDb();
 
-  app.listen(PORT, () => {
+  app.listen(PORT, '0.0.0.0', () => {
     console.log(`
   ┌──────────────────────────────────────────┐
   │   iCash Secure Banking Server            │

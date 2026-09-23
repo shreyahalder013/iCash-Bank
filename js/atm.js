@@ -105,7 +105,7 @@ function renderAtmWelcome(){
 
     } catch (e) {
       console.error('[ATM] Challenge request failed:', e);
-      toast('Network error connecting to biometric server', 'danger');
+      toast(`Biometric server unreachable at ${API}. Ensure 'npm start' is running on port 3000.`, 'danger');
       renderAtmWelcome();
     }
   };

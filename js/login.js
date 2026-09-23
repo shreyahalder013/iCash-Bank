@@ -41,6 +41,7 @@ async function renderLoginHome(){
       const res = await fetch(API + '/auth/biometric/challenge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ accountId: targetUser.id, phone: targetUser.phone })
       });
       const data = await res.json();
@@ -111,7 +112,7 @@ async function renderLoginHome(){
 
     } catch (e) {
       console.error('Challenge error:', e);
-      toast('Network error connecting to biometric server', 'danger');
+      toast(`Biometric server unreachable at ${API}. Ensure 'npm start' is running on port 3000.`, 'danger');
       renderLoginHome();
     }
   };

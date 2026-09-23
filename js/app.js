@@ -6,9 +6,20 @@
 /* ---------- API BASE ---------- */
 const API = (function() {
   if (typeof window !== 'undefined') {
-    // If the frontend is accessed via file:// or a dev server on another port (e.g. Live Server on 5500)
-    if (window.location.protocol === 'file:' || (window.location.port && window.location.port !== '3000')) {
+    const custom = localStorage.getItem('icash_api_url');
+    if (custom) return custom;
+
+    const hostname = window.location.hostname || 'localhost';
+    const port = window.location.port;
+
+    // If opened directly from file://
+    if (window.location.protocol === 'file:') {
       return 'http://localhost:3000/api';
+    }
+
+    // If served on a dev port other than 3000 (e.g. Live Server on 5500, Vite on 5173)
+    if (port && port !== '3000') {
+      return `http://${hostname}:3000/api`;
     }
   }
   return '/api';
