@@ -1,331 +1,304 @@
 /* =========================================================
-   ICASH — SQLite Database Layer (using sql.js)
-   Pure JavaScript SQLite — no native build tools required.
-   Database is persisted to disk as a file.
+   ICASH — Supabase / PostgreSQL Database Layer
+   Uses node-postgres (pg) Pool connected via SUPABASE_DB_URL.
+   All exported functions keep the same signature as the old
+   sql.js version so server.js requires zero changes.
 ========================================================= */
-const initSqlJs = require('sql.js');
-const fs = require('fs');
-const path = require('path');
+const { Pool } = require('pg');
 
-const DB_PATH = path.join(__dirname, 'icash.db');
+const pool = new Pool({
+  connectionString: process.env.SUPABASE_DB_URL,
+  ssl: { rejectUnauthorized: false }   // required for Supabase hosted TLS
+});
 
-let db = null;
-let SQL = null;
+/* =========================================================
+   INIT
+========================================================= */
+async function initDb() {
+  // Verify connection
+  const client = await pool.connect();
+  client.release();
 
-async function initDb(){
-  if(db) return db;
-
-  SQL = await initSqlJs();
-
-  // Load existing database or create new one
-  if(fs.existsSync(DB_PATH)){
-    const buffer = fs.readFileSync(DB_PATH);
-    db = new SQL.Database(buffer);
-  } else {
-    db = new SQL.Database();
-  }
-
-  initTables();
-  seedIfEmpty();
-  saveToFile();
-  return db;
-}
-
-function getDb(){
-  if(!db) throw new Error('Database not initialized. Call initDb() first.');
-  return db;
-}
-
-function saveToFile(){
-  if(!db) return;
-  const data = db.export();
-  const buffer = Buffer.from(data);
-  fs.writeFileSync(DB_PATH, buffer);
-}
-
-function initTables(){
-  db.run(`
+  // Create tables if they don't exist yet
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      phone TEXT NOT NULL,
-      aadhaar TEXT,
-      email TEXT,
-      dob TEXT,
-      age INTEGER,
-      senior INTEGER DEFAULT 0,
-      normal_pin TEXT NOT NULL,
-      emergency_pin TEXT,
-      emergency_contact_name TEXT,
-      emergency_contact_phone TEXT,
-      emergency_contact_relation TEXT,
-      face_registered INTEGER DEFAULT 0,
-      last_login TEXT,
-      senior_mode INTEGER DEFAULT 0,
-      balance REAL DEFAULT 48750,
-      created_at TEXT DEFAULT (datetime('now'))
+      id                          SERIAL PRIMARY KEY,
+      name                        TEXT NOT NULL,
+      phone                       TEXT NOT NULL,
+      aadhaar                     TEXT,
+      email                       TEXT,
+      dob                         TEXT,
+      age                         INTEGER,
+      senior                      BOOLEAN DEFAULT FALSE,
+      normal_pin                  TEXT NOT NULL,
+      emergency_pin               TEXT,
+      emergency_contact_name      TEXT,
+      emergency_contact_phone     TEXT,
+      emergency_contact_relation  TEXT,
+      face_registered             BOOLEAN DEFAULT FALSE,
+      last_login                  TEXT,
+      senior_mode                 BOOLEAN DEFAULT FALSE,
+      balance                     NUMERIC(12,2) DEFAULT 48750,
+      created_at                  TIMESTAMPTZ DEFAULT NOW()
     )
   `);
 
-  db.run(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS transactions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      txn_id TEXT NOT NULL,
-      date TEXT NOT NULL,
+      id          SERIAL PRIMARY KEY,
+      user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      txn_id      TEXT NOT NULL,
+      date        TEXT NOT NULL,
       description TEXT NOT NULL,
-      type TEXT NOT NULL,
-      category TEXT,
-      amount REAL NOT NULL,
-      status TEXT DEFAULT 'Completed',
-      created_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      type        TEXT NOT NULL,
+      category    TEXT,
+      amount      NUMERIC(12,2) NOT NULL,
+      status      TEXT DEFAULT 'Completed',
+      created_at  TIMESTAMPTZ DEFAULT NOW()
     )
   `);
 
-  db.run(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS security_events (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      type TEXT NOT NULL,
+      id          SERIAL PRIMARY KEY,
+      user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      type        TEXT NOT NULL,
       description TEXT NOT NULL,
-      timestamp TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      timestamp   TIMESTAMPTZ DEFAULT NOW()
     )
   `);
 
-  db.run(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS sessions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      method TEXT,
-      active INTEGER DEFAULT 1,
-      created_at TEXT DEFAULT (datetime('now')),
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      id         SERIAL PRIMARY KEY,
+      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      method     TEXT,
+      active     BOOLEAN DEFAULT TRUE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
+
+  await seedIfEmpty();
+  console.log('✓ Connected to Supabase PostgreSQL — tables ready');
 }
 
-function seedIfEmpty(){
-  const result = db.exec('SELECT COUNT(*) as c FROM users');
-  const count = result.length > 0 ? result[0].values[0][0] : 0;
-  if(count > 0) return;
+/* =========================================================
+   SEED
+========================================================= */
+async function seedIfEmpty() {
+  const { rows } = await pool.query('SELECT COUNT(*) AS c FROM users');
+  if (parseInt(rows[0].c) > 0) return;
 
-  // Seed demo user
-  db.run(`
-    INSERT INTO users (name, phone, aadhaar, email, dob, age, senior, normal_pin, emergency_pin,
+  const { rows: inserted } = await pool.query(`
+    INSERT INTO users (
+      name, phone, aadhaar, email, dob, age, senior,
+      normal_pin, emergency_pin,
       emergency_contact_name, emergency_contact_phone, emergency_contact_relation,
-      face_registered, last_login, senior_mode, balance)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      face_registered, last_login, senior_mode, balance
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+    RETURNING id
   `, [
     'Siddharth Pal', '+91 98765 43210', '482145678921', 'siddharth.demo@icash.app',
-    '1999-04-12', 25, 0, '2468', '9999',
+    '1999-04-12', 25, false,
+    '2468', '9999',
     'Ravi Pal', '+91 91234 56789', 'Father',
-    1, '20 Sep 2026, 09:14', 0, 48750
+    true, '20 Sep 2026, 09:14', false, 48750
   ]);
 
-  // Get the user ID (last inserted row)
-  const userIdResult = db.exec('SELECT last_insert_rowid() as id');
-  const userId = userIdResult[0].values[0][0];
+  const userId = inserted[0].id;
 
-  // Seed demo transactions
   const seedTx = [
-    ['TXN-9F21A', '2026-09-20', 'Salary Credit', 'in', null, 5000, 'Completed'],
-    ['TXN-8C10B', '2026-09-19', 'Grocery Store', 'out', 'Food', 1200, 'Completed'],
-    ['TXN-7A02D', '2026-09-18', 'ATM Withdrawal', 'out', 'Cash', 2000, 'Completed'],
-    ['TXN-6E88F', '2026-09-16', 'Electricity Bill', 'out', 'Bills', 500, 'Completed'],
-    ['TXN-5D77C', '2026-09-14', 'Cab Ride', 'out', 'Transport', 750, 'Completed'],
+    ['TXN-9F21A', '2026-09-20', 'Salary Credit',    'in',  null,         5000],
+    ['TXN-8C10B', '2026-09-19', 'Grocery Store',    'out', 'Food',       1200],
+    ['TXN-7A02D', '2026-09-18', 'ATM Withdrawal',   'out', 'Cash',       2000],
+    ['TXN-6E88F', '2026-09-16', 'Electricity Bill', 'out', 'Bills',       500],
+    ['TXN-5D77C', '2026-09-14', 'Cab Ride',         'out', 'Transport',   750],
   ];
 
-  for(const [txnId, date, desc, type, cat, amount, status] of seedTx){
-    db.run(`
-      INSERT INTO transactions (user_id, txn_id, date, description, type, category, amount, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `, [userId, txnId, date, desc, type, cat, amount, status]);
+  for (const [txnId, date, desc, type, cat, amount] of seedTx) {
+    await pool.query(
+      'INSERT INTO transactions (user_id,txn_id,date,description,type,category,amount) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+      [userId, txnId, date, desc, type, cat, amount]
+    );
   }
 
   console.log('✓ Database seeded with demo user and transactions');
 }
 
-/* ---------- Helper: run query and get rows as objects ---------- */
-function queryAll(sql, params = []){
-  const stmt = db.prepare(sql);
-  if(params.length) stmt.bind(params);
-  const rows = [];
-  while(stmt.step()){
-    rows.push(stmt.getAsObject());
-  }
-  stmt.free();
-  return rows;
-}
-
-function queryOne(sql, params = []){
-  const rows = queryAll(sql, params);
-  return rows.length > 0 ? rows[0] : null;
-}
-
-/* ---------- Query Functions ---------- */
-
-function createUser(userData){
-  db.run(`
-    INSERT INTO users (name, phone, aadhaar, email, dob, age, senior, normal_pin, emergency_pin,
-      emergency_contact_name, emergency_contact_phone, emergency_contact_relation,
-      face_registered, last_login, senior_mode, balance)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `, [
-    userData.name, userData.phone, userData.aadhaar, userData.email,
-    userData.dob, userData.age, userData.senior ? 1 : 0,
-    userData.normalPin, userData.emergencyPin,
-    userData.emergencyContact?.name || null,
-    userData.emergencyContact?.phone || null,
-    userData.emergencyContact?.relation || null,
-    userData.faceRegistered ? 1 : 0,
-    userData.lastLogin || 'Just now',
-    userData.seniorMode ? 1 : 0,
-    48750
-  ]);
-  const result = db.exec('SELECT last_insert_rowid() as id');
-  const userId = result[0].values[0][0];
-  saveToFile();
-  return userId;
-}
-
-function formatUser(row){
-  if(!row) return null;
+/* =========================================================
+   USER HELPERS
+========================================================= */
+function formatUser(row) {
+  if (!row) return null;
   return {
-    id: row.id,
-    name: row.name,
-    phone: row.phone,
-    aadhaar: row.aadhaar,
-    email: row.email,
-    dob: row.dob,
-    age: row.age,
-    senior: !!row.senior,
-    normalPin: row.normal_pin,
-    emergencyPin: row.emergency_pin,
+    id:            row.id,
+    name:          row.name,
+    phone:         row.phone,
+    aadhaar:       row.aadhaar,
+    email:         row.email,
+    dob:           row.dob,
+    age:           row.age,
+    senior:        !!row.senior,
+    normalPin:     row.normal_pin,
+    emergencyPin:  row.emergency_pin,
     emergencyContact: {
-      name: row.emergency_contact_name,
-      phone: row.emergency_contact_phone,
+      name:     row.emergency_contact_name,
+      phone:    row.emergency_contact_phone,
       relation: row.emergency_contact_relation
     },
     faceRegistered: !!row.face_registered,
-    lastLogin: row.last_login,
-    seniorMode: !!row.senior_mode,
-    balance: row.balance
+    lastLogin:     row.last_login,
+    seniorMode:    !!row.senior_mode,
+    balance:       parseFloat(row.balance)
   };
 }
 
-function getUserById(id){
-  const row = queryOne('SELECT * FROM users WHERE id = ?', [id]);
-  return formatUser(row);
+async function createUser(userData) {
+  const { rows } = await pool.query(`
+    INSERT INTO users (
+      name, phone, aadhaar, email, dob, age, senior,
+      normal_pin, emergency_pin,
+      emergency_contact_name, emergency_contact_phone, emergency_contact_relation,
+      face_registered, last_login, senior_mode, balance
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+    RETURNING id
+  `, [
+    userData.name, userData.phone, userData.aadhaar, userData.email,
+    userData.dob, userData.age, userData.senior ? true : false,
+    userData.normalPin, userData.emergencyPin,
+    userData.emergencyContact?.name  || null,
+    userData.emergencyContact?.phone || null,
+    userData.emergencyContact?.relation || null,
+    userData.faceRegistered ? true : false,
+    userData.lastLogin || 'Just now',
+    userData.seniorMode ? true : false,
+    48750
+  ]);
+  return rows[0].id;
 }
 
-function getUserByPhone(phone){
-  const row = queryOne('SELECT * FROM users WHERE phone = ?', [phone]);
-  return formatUser(row);
+async function getUserById(id) {
+  const { rows } = await pool.query('SELECT * FROM users WHERE id = $1', [id]);
+  return formatUser(rows[0] || null);
 }
 
-function getFirstUser(){
-  const row = queryOne('SELECT * FROM users ORDER BY id ASC LIMIT 1');
-  return formatUser(row);
+async function getUserByPhone(phone) {
+  const { rows } = await pool.query('SELECT * FROM users WHERE phone = $1', [phone]);
+  return formatUser(rows[0] || null);
 }
 
-function updateUser(id, data){
+async function getFirstUser() {
+  const { rows } = await pool.query('SELECT * FROM users ORDER BY id ASC LIMIT 1');
+  return formatUser(rows[0] || null);
+}
+
+async function updateUser(id, data) {
   const fields = [];
   const values = [];
+  let i = 1;
 
-  if(data.name !== undefined){ fields.push('name = ?'); values.push(data.name); }
-  if(data.phone !== undefined){ fields.push('phone = ?'); values.push(data.phone); }
-  if(data.email !== undefined){ fields.push('email = ?'); values.push(data.email); }
-  if(data.seniorMode !== undefined){ fields.push('senior_mode = ?'); values.push(data.seniorMode ? 1 : 0); }
-  if(data.lastLogin !== undefined){ fields.push('last_login = ?'); values.push(data.lastLogin); }
-  if(data.balance !== undefined){ fields.push('balance = ?'); values.push(data.balance); }
-  if(data.normalPin !== undefined){ fields.push('normal_pin = ?'); values.push(data.normalPin); }
-  if(data.emergencyPin !== undefined){ fields.push('emergency_pin = ?'); values.push(data.emergencyPin); }
-  if(data.emergencyContact){
-    fields.push('emergency_contact_name = ?', 'emergency_contact_phone = ?', 'emergency_contact_relation = ?');
+  if (data.name          !== undefined) { fields.push(`name = $${i++}`);          values.push(data.name); }
+  if (data.phone         !== undefined) { fields.push(`phone = $${i++}`);         values.push(data.phone); }
+  if (data.email         !== undefined) { fields.push(`email = $${i++}`);         values.push(data.email); }
+  if (data.seniorMode    !== undefined) { fields.push(`senior_mode = $${i++}`);   values.push(!!data.seniorMode); }
+  if (data.lastLogin     !== undefined) { fields.push(`last_login = $${i++}`);    values.push(data.lastLogin); }
+  if (data.balance       !== undefined) { fields.push(`balance = $${i++}`);       values.push(data.balance); }
+  if (data.normalPin     !== undefined) { fields.push(`normal_pin = $${i++}`);    values.push(data.normalPin); }
+  if (data.emergencyPin  !== undefined) { fields.push(`emergency_pin = $${i++}`); values.push(data.emergencyPin); }
+  if (data.emergencyContact) {
+    fields.push(`emergency_contact_name = $${i++}`, `emergency_contact_phone = $${i++}`, `emergency_contact_relation = $${i++}`);
     values.push(data.emergencyContact.name, data.emergencyContact.phone, data.emergencyContact.relation);
   }
 
-  if(fields.length === 0) return;
+  if (fields.length === 0) return;
   values.push(id);
-  db.run(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`, values);
-  saveToFile();
+  await pool.query(`UPDATE users SET ${fields.join(', ')} WHERE id = $${i}`, values);
 }
 
-function getTransactions(userId, filters = {}){
-  let sql = 'SELECT * FROM transactions WHERE user_id = ?';
+/* =========================================================
+   TRANSACTIONS
+========================================================= */
+async function getTransactions(userId, filters = {}) {
+  let sql = 'SELECT * FROM transactions WHERE user_id = $1';
   const params = [userId];
+  let i = 2;
 
-  if(filters.type){
-    sql += ' AND type = ?';
-    params.push(filters.type);
-  }
-  if(filters.date){
-    sql += ' AND date = ?';
-    params.push(filters.date);
-  }
-  if(filters.search){
-    sql += ' AND (description LIKE ? OR txn_id LIKE ?)';
-    params.push(`%${filters.search}%`, `%${filters.search}%`);
-  }
+  if (filters.type)   { sql += ` AND type = $${i++}`;             params.push(filters.type); }
+  if (filters.date)   { sql += ` AND date = $${i++}`;             params.push(filters.date); }
+  if (filters.search) { sql += ` AND (description ILIKE $${i} OR txn_id ILIKE $${i})`; i++; params.push(`%${filters.search}%`); }
 
   sql += ' ORDER BY created_at DESC';
 
-  return queryAll(sql, params).map(row => ({
-    id: row.txn_id,
-    date: row.date,
-    desc: row.description,
-    type: row.type,
-    cat: row.category,
-    amount: row.amount,
+  const { rows } = await pool.query(sql, params);
+  return rows.map(row => ({
+    id:     row.txn_id,
+    date:   row.date,
+    desc:   row.description,
+    type:   row.type,
+    cat:    row.category,
+    amount: parseFloat(row.amount),
     status: row.status
   }));
 }
 
-function createTransaction(userId, tx){
-  db.run(`
-    INSERT INTO transactions (user_id, txn_id, date, description, type, category, amount, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `, [userId, tx.id, tx.date, tx.desc, tx.type, tx.cat || null, tx.amount, tx.status || 'Completed']);
-  saveToFile();
+async function createTransaction(userId, tx) {
+  await pool.query(
+    'INSERT INTO transactions (user_id,txn_id,date,description,type,category,amount,status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
+    [userId, tx.id, tx.date, tx.desc, tx.type, tx.cat || null, tx.amount, tx.status || 'Completed']
+  );
 }
 
-function getSecurityEvents(userId, limit = 12){
-  return queryAll('SELECT * FROM security_events WHERE user_id = ? ORDER BY timestamp DESC LIMIT ?', [userId, limit])
-    .map(row => ({
-      type: row.type,
-      desc: row.description,
-      time: row.timestamp
-    }));
+/* =========================================================
+   SECURITY EVENTS
+========================================================= */
+async function getSecurityEvents(userId, limit = 12) {
+  const { rows } = await pool.query(
+    'SELECT * FROM security_events WHERE user_id = $1 ORDER BY timestamp DESC LIMIT $2',
+    [userId, limit]
+  );
+  return rows.map(row => ({
+    type: row.type,
+    desc: row.description,
+    time: row.timestamp
+  }));
 }
 
-function logSecurityEvent(userId, type, description){
-  db.run('INSERT INTO security_events (user_id, type, description) VALUES (?, ?, ?)', [userId, type, description]);
-  saveToFile();
+async function logSecurityEvent(userId, type, description) {
+  await pool.query(
+    'INSERT INTO security_events (user_id,type,description) VALUES ($1,$2,$3)',
+    [userId, type, description]
+  );
 }
 
-function createSession(userId, method){
-  // Deactivate old sessions
-  db.run('UPDATE sessions SET active = 0 WHERE user_id = ?', [userId]);
-  db.run('INSERT INTO sessions (user_id, method, active) VALUES (?, ?, 1)', [userId, method]);
-  const result = db.exec('SELECT last_insert_rowid() as id');
-  saveToFile();
-  return result[0].values[0][0];
+/* =========================================================
+   SESSIONS
+========================================================= */
+async function createSession(userId, method) {
+  await pool.query('UPDATE sessions SET active = FALSE WHERE user_id = $1', [userId]);
+  const { rows } = await pool.query(
+    'INSERT INTO sessions (user_id,method,active) VALUES ($1,$2,TRUE) RETURNING id',
+    [userId, method]
+  );
+  return rows[0].id;
 }
 
-function deactivateSession(userId){
-  db.run('UPDATE sessions SET active = 0 WHERE user_id = ?', [userId]);
-  saveToFile();
+async function deactivateSession(userId) {
+  await pool.query('UPDATE sessions SET active = FALSE WHERE user_id = $1', [userId]);
 }
 
-function getActiveSession(userId){
-  return queryOne('SELECT * FROM sessions WHERE user_id = ? AND active = 1 ORDER BY created_at DESC LIMIT 1', [userId]);
+async function getActiveSession(userId) {
+  const { rows } = await pool.query(
+    'SELECT * FROM sessions WHERE user_id = $1 AND active = TRUE ORDER BY created_at DESC LIMIT 1',
+    [userId]
+  );
+  return rows[0] || null;
 }
 
+/* =========================================================
+   EXPORTS  (same surface as old db.js)
+========================================================= */
 module.exports = {
   initDb,
-  getDb,
   createUser,
   getUserById,
   getUserByPhone,

@@ -1,7 +1,7 @@
 {
   "name": "icash-server",
   "version": "1.0.0",
-  "description": "iCash Banking Backend — Express + SQLite (sql.js)",
+  "description": "iCash Banking Backend — Express + Supabase PostgreSQL",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -11,6 +11,6 @@
     "cors": "^2.8.5",
     "express": "^4.21.0",
     "express-session": "^1.18.1",
-    "sql.js": "^1.11.0"
+    "pg": "^8.13.0"
   }
 }
